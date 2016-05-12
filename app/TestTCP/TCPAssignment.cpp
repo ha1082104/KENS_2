@@ -64,7 +64,7 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid, const SystemCallPa
 		this->syscall_close(syscallUUID, pid, param.param1_int);
 		break;
 	case READ:
-		//this->syscall_read(syscallUUID, pid, param.param1_int, param.param2_ptr, param.param3_int);
+		this->syscall_read(syscallUUID, pid, param.param1_int, param.param2_ptr, param.param3_int);
 		break;
 	case WRITE:
 		this->syscall_write(syscallUUID, pid, param.param1_int, param.param2_ptr, param.param3_int);
@@ -118,7 +118,7 @@ void TCPAssignment::syscall_close (UUID syscallUUID, int pid, int fd)
 	
 	if (cursor->tcp_state == E::ESTABLISHED)
 	{
-		int seq_num = htonl (this->random_seq_num);
+		int seq_num = htonl (cursor->seq_num++);
 		uint8_t hdr_len = 0x50;
 		uint8_t sending_flag = 0x0 | FIN_FLAG;
 		unsigned short checksum = 0;
@@ -140,7 +140,7 @@ void TCPAssignment::syscall_close (UUID syscallUUID, int pid, int fd)
 		checksum = this->calculate_checksum (cursor->src_addr, cursor->dst_addr, tmp_header);
 		fin_packet->writeData (50, &checksum, 2);
 
-		cursor->seq_num = this->random_seq_num++;
+		// cursor->seq_num = this->random_seq_num++;
 		cursor->tcp_state = E::FIN_WAIT_1;
 		cursor->wake_args.syscallUUID = syscallUUID;
 
@@ -187,97 +187,100 @@ void TCPAssignment::syscall_close (UUID syscallUUID, int pid, int fd)
 	}
 }
 
+void TCPAssignment::syscall_read (UUID syscallUUID, int pid, int sockfd, void *buffer, int length)
+{
+	return;
+}
+
 void TCPAssignment::syscall_write (UUID syscallUUID, int pid, int sockfd, const void *send_buffer, int length)
 {
 	std::list< struct tcp_context >::iterator current_context = find_tcp_context (pid, sockfd);
 
 	if (current_context->tcp_state != E::ESTABLISHED)
-	{
-		fprintf (stderr, "here!!\n");
-		return;
-	}
+		this->returnSystemCall (syscallUUID, -1);
 
-	int remain_bytes = 0;
-	int sent_bytes = 0;
-
-	if (length > this->MSS * 5)
-		remain_bytes = this->MSS * 5;
 	else
-		remain_bytes = length;
-
-	while (remain_bytes != 0)
 	{
-		int loop = 0;
-		int sending_bytes = 0;
+		int remain_bytes = 0;
+		int sent_bytes = 0;
 
-		if ((sending_bytes = this->MSS) > remain_bytes)
-			sending_bytes = remain_bytes;
+		if (length > this->MSS * 5)
+			remain_bytes = this->MSS * 5;
+		else
+			remain_bytes = length;
 
-		int seq_num = htonl (current_context->seq_num);
-		int sending_flag = 0x0;
-		uint8_t hdr_len = 0x50;
-		unsigned short checksum = 0;
-		struct tcp_header tmp_header;
-
-		fprintf (stderr, "breakpoint 1\n");
-		Packet *data_packet = this->allocatePacket (54 + sending_bytes);
-
-		data_packet->writeData (26, &current_context->src_addr, 4);
-		data_packet->writeData (30, &current_context->dst_addr, 4);
-		data_packet->writeData (34, &current_context->src_port, 2);
-		data_packet->writeData (36, &current_context->dst_port, 2);
-		data_packet->writeData (38, &seq_num, 4);
-		data_packet->writeData (46, &hdr_len, 1);
-		data_packet->writeData (47, &sending_flag, 1);
-		data_packet->writeData (50, &checksum, 2);
-
-		data_packet->readData (34, &tmp_header, 20);
-		checksum = this->calculate_checksum (current_context->src_addr, current_context->dst_addr, tmp_header);
-		data_packet->writeData (50, &checksum, 2);
-		fprintf (stderr, "breakpoint 2\n");
-		data_packet->writeData (54, (uint8_t *) send_buffer + sent_bytes, sending_bytes);
-
-		seq_num = ntohl (seq_num);
-
-		struct sent_packet sent_pkt;
-		sent_pkt.packet = this->clonePacket (data_packet);
-		sent_pkt.sent_seq = seq_num;
-		sent_pkt.expect_ack = seq_num + sending_bytes;
-		sent_pkt.data_start = sent_bytes;
-		sent_pkt.data_length = sending_bytes;
-		fprintf (stderr, "breakpoint 3\n");
-		sent_pkt.sent_time = this->getHost ()->getSystem ()->getCurrentTime ();
-
-		// add timer only for first packet 
-		if (loop == 0)	
+		while (remain_bytes != 0)
 		{
-			UUID timerUUID;
-			/* timer */
-			struct timer_arguments *timer_args = (struct timer_arguments *) malloc (sizeof (struct timer_arguments));																									
-			timer_args->pid = current_context->pid;
-			timer_args->sockfd = current_context->sockfd;
-			timer_args->seq_num = seq_num;
-			double timeoutInterval = get_timeout_interval (current_context);				
+			int loop = 0;
+			int sending_bytes = 0;
 
-			timerUUID = this->addTimer ((void *) timer_args, this->getHost ()->getSystem ()->getCurrentTime () + timeoutInterval);
+			if ((sending_bytes = this->MSS) > remain_bytes)
+				sending_bytes = remain_bytes;
 
-			current_context->transfer_timerUUID = timerUUID;									
+			int seq_num = htonl (current_context->seq_num);
+			int ack_num = htonl (current_context->ack_num);
+			uint8_t sending_flag = 0x0;
+			uint8_t hdr_len = 0x50;
+			unsigned short rwnd = htons (512 * 100);
+			unsigned short checksum = 0;
+			struct tcp_header tmp_header;
+
+			Packet *data_packet = this->allocatePacket (54 + sending_bytes);
+
+			data_packet->writeData (26, &current_context->src_addr, 4);
+			data_packet->writeData (30, &current_context->dst_addr, 4);
+			data_packet->writeData (34, &current_context->src_port, 2);
+			data_packet->writeData (36, &current_context->dst_port, 2);
+			data_packet->writeData (38, &seq_num, 4);
+			data_packet->writeData (42, &ack_num, 4);
+			data_packet->writeData (46, &hdr_len, 1);
+			data_packet->writeData (47, &sending_flag, 1);
+			data_packet->writeData (48, &rwnd, 2);
+			data_packet->writeData (50, &checksum, 2);
+
+			data_packet->readData (34, &tmp_header, 20);
+			checksum = this->calculate_checksum (current_context->src_addr, current_context->dst_addr, tmp_header);
+			data_packet->writeData (50, &checksum, 2);
+			data_packet->writeData (54, send_buffer + sent_bytes, sending_bytes);
+
+			seq_num = ntohl (seq_num);
+
+			struct sent_packet sent_pkt;
+			sent_pkt.packet = this->clonePacket (data_packet);
+			sent_pkt.sent_seq = seq_num;
+			sent_pkt.expect_ack = seq_num + sending_bytes;
+			sent_pkt.data_start = sent_bytes;
+			sent_pkt.data_length = sending_bytes;
+			sent_pkt.sent_time = this->getHost ()->getSystem ()->getCurrentTime ();
+
+			// add timer only for first packet 
+			if (loop == 0)	
+			{
+				UUID timerUUID;
+				
+				struct timer_arguments *timer_args = (struct timer_arguments *) malloc (sizeof (struct timer_arguments));																									
+				timer_args->pid = current_context->pid;
+				timer_args->sockfd = current_context->sockfd;
+				timer_args->seq_num = seq_num;
+				double timeoutInterval = get_timeout_interval (current_context);
+
+				timerUUID = this->addTimer ((void *) timer_args, this->getHost ()->getSystem ()->getCurrentTime () + timeoutInterval);
+
+				current_context->transfer_timerUUID = timerUUID;
+			}
+
+			this->sendPacket ("IPv4", data_packet);
+			current_context->send_buffer.push_back (sent_pkt);
+
+			remain_bytes -= sending_bytes;
+			sent_bytes += sending_bytes;
+			current_context->seq_num += sending_bytes;
+			loop++;
 		}
 
-		this->sendPacket ("IPv4", data_packet);
-		fprintf (stderr, "breakpoint 4\n");
-		current_context->sent_packet_list.push_back (sent_pkt);
-		fprintf (stderr, "breakpoint 5\n");
-
-		remain_bytes -= sending_bytes;
-		sent_bytes += sending_bytes;
-		current_context->seq_num += sending_bytes;
-		loop++;
-		fprintf (stderr, "remain bytes: %d, sent_bytes: %d\n", remain_bytes, sent_bytes);
+		current_context->wake_args.syscallUUID = syscallUUID;
+		this->returnSystemCall (syscallUUID, sent_bytes);
 	}
-
-	current_context->wake_args.syscallUUID = syscallUUID;
-	return;
 }
 
 void TCPAssignment::syscall_connect (UUID syscallUUID, int pid, int sockfd, struct sockaddr *serv_addr, socklen_t addrlen)
@@ -589,8 +592,10 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 		{
 			if (SYN)
 			{
+				int seq_num = htonl (recv_ack_num);
 				int ack_num = htonl (recv_seq_num + 1);
 				uint8_t sending_flag = 0x0 | ACK_FLAG;
+				unsigned short rwnd = htons (512 * 100);
 				unsigned short checksum = 0;
 				struct tcp_header tmp_header;
 
@@ -600,8 +605,10 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 				ack_packet->writeData (30, &src_addr, 4);
 				ack_packet->writeData (34, &recv_tcp_header->dst_port, 2);
 				ack_packet->writeData (36, &recv_tcp_header->src_port, 2);
+				ack_packet->writeData (38, &seq_num, 4);
 				ack_packet->writeData (42, &ack_num, 4);
 				ack_packet->writeData (47, &sending_flag, 1);
+				ack_packet->writeData (48, &rwnd, 2);
 				ack_packet->writeData (50, &checksum, 2);
 
 				ack_packet->readData (34, &tmp_header, 20);
@@ -616,6 +623,9 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 				if (recv_ack_num - 1 == current_context->seq_num)
 				{
 					current_context->tcp_state = E::ESTABLISHED;
+					current_context->seq_num = current_context->seq_num + 1;
+					current_context->ack_num = recv_seq_num + 1;
+					fprintf (stderr, "ack num is %d\n", current_context->ack_num);
 					this->returnSystemCall (current_context->wake_args.syscallUUID, 0);
 				}
 				
@@ -630,6 +640,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 			if (FIN)
 			{
 				/* this is server-side and send ACK packet */
+				int ack_num = htonl (recv_seq_num + 1);
 				uint8_t hdr_len = 0x50;
 				uint8_t sending_flag = 0x0 | FIN_FLAG;
 				unsigned short checksum = 0;
@@ -641,6 +652,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 				ack_packet->writeData (30, &src_addr, 4);
 				ack_packet->writeData (34, &recv_tcp_header->dst_port, 2);
 				ack_packet->writeData (36, &recv_tcp_header->src_port, 2);
+				ack_packet->writeData (42, &ack_num, 4);
 				ack_packet->writeData (46, &hdr_len, 1);
 				ack_packet->writeData (47, &sending_flag, 1);
 				ack_packet->writeData (50, &checksum, 2);
@@ -654,7 +666,9 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 			}
 
 			if (ACK)
-				fprintf (stderr, "########### success ##########\n");
+			{
+
+			}
 		}
 		break;
 
@@ -820,11 +834,19 @@ void TCPAssignment::timerCallback(void* payload)
 {
 	std::list< struct tcp_context >::iterator entry = this->find_tcp_context (((struct timer_arguments *) payload)->pid, ((struct timer_arguments *) payload)->sockfd);
 
-	entry->tcp_state = E::CLOSED;
-	UUID retUUID = entry->wake_args.syscallUUID;
-	this->remove_tcp_context (entry->pid, entry->sockfd);
-	free ((struct timer_arguments *) payload);
-	this->returnSystemCall (retUUID, 0);
+	if (entry->tcp_state == E::ESTABLISHED)
+	{
+		/* Retransmission */
+	}
+
+	else
+	{
+		entry->tcp_state = E::CLOSED;
+		UUID retUUID = entry->wake_args.syscallUUID;
+		this->remove_tcp_context (entry->pid, entry->sockfd);
+		free ((struct timer_arguments *) payload);
+		this->returnSystemCall (retUUID, 0);
+	}
 }
 
 /* Helper */

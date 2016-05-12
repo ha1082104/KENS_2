@@ -64,13 +64,15 @@ namespace E
 		bool is_bound = false;
 	   int backlog;
 		int seq_num;
+		int ack_num;
 		int to_be_accepted = 0;
 		std::list< struct tcp_context > pending_conn_list;
 		std::list< struct tcp_context > estab_conn_list;
 		struct wakeup_arguments wake_args;
 
 		/* for transfer */
-		std::vector< struct sent_packet > sent_packet_list;
+		std::list< struct sent_packet > send_buffer;
+		unsigned short peer_window;
 		double estimatedRTT = 100;
 		double sampleRTT = 100;
 		double devRTT = 0;
@@ -108,7 +110,7 @@ class TCPAssignment : public HostModule, public NetworkModule, public SystemCall
 private:
 	std::list < struct tcp_context > tcp_context_list;
 	int random_seq_num = 0;
-	int random_port = 10000;
+	unsigned short random_port = 10000;
 
 	/* for trnasfer */
 	uint32_t window_send_size = 5;
@@ -120,6 +122,7 @@ private:
 	/* System Call */
 	void syscall_socket (UUID, int, int, int);
 	void syscall_close (UUID, int, int);
+	void syscall_read (UUID, int, int, void *, int);
 	void syscall_write (UUID, int, int, const void *, int);
 	void syscall_connect (UUID, int, int, struct sockaddr *, socklen_t addrlen);
 	void syscall_listen (UUID, int, int, int);

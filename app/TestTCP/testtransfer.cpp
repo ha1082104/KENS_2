@@ -307,15 +307,15 @@ TEST_F(TestEnv_Any, TestTransfer_Connect_Send_Symmetric)
 
 	connect_env["CONNECT_ADDR"] = host2_ip;
 	connect_env["BUFFER_SIZE"] = "1024";
-	connect_env["LOOP_COUNT"] = "128";
+	connect_env["LOOP_COUNT"] = "20";
 	connect_env["SENDER"] = "1";
-	connect_env["EXPECT_SIZE"] = "131072";
+	connect_env["EXPECT_SIZE"] = "20480";
 	TestTransfer_Connect client(host1, connect_env);
 
 	accept_env["SENDER"] = "0";
 	accept_env["BUFFER_SIZE"] = "1024";
-	accept_env["LOOP_COUNT"] = "128";
-	accept_env["EXPECT_SIZE"] = "131072";
+	accept_env["LOOP_COUNT"] = "20";
+	accept_env["EXPECT_SIZE"] = "20480";
 	TestTransfer_Accept server(host2, accept_env);
 
 	server.initialize();
