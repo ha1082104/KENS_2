@@ -150,7 +150,7 @@ void TCPAssignment::syscall_close (UUID syscallUUID, int pid, int fd)
 
 	else if (cursor->tcp_state == E::CLOSE_WAIT)
 	{
-		int seq_num = htonl (this->random_seq_num);
+		int seq_num = htonl (cursor->seq_num++);
 		uint8_t hdr_len = 0x50;
 		uint8_t sending_flag = 0x0 | FIN_FLAG;
 		unsigned short checksum = 0;
@@ -171,7 +171,7 @@ void TCPAssignment::syscall_close (UUID syscallUUID, int pid, int fd)
 		checksum = this->calculate_checksum (cursor->src_addr, cursor->dst_addr, tmp_header);
 		fin_packet->writeData (50, &checksum, 2);
 
-		cursor->seq_num = this->random_seq_num++;
+		// cursor->seq_num = this->random_seq_num++;
 		cursor->tcp_state = E::LAST_ACK;
 		cursor->wake_args.syscallUUID = syscallUUID;
 
@@ -189,7 +189,7 @@ void TCPAssignment::syscall_close (UUID syscallUUID, int pid, int fd)
 
 void TCPAssignment::syscall_read (UUID syscallUUID, int pid, int sockfd, void *buffer, int length)
 {
-	return;
+	fprintf (stderr, "read call!\n");
 }
 
 void TCPAssignment::syscall_write (UUID syscallUUID, int pid, int sockfd, const void *send_buffer, int length)
@@ -219,7 +219,7 @@ void TCPAssignment::syscall_write (UUID syscallUUID, int pid, int sockfd, const 
 
 			int seq_num = htonl (current_context->seq_num);
 			int ack_num = htonl (current_context->ack_num);
-			uint8_t sending_flag = 0x0;
+			uint8_t sending_flag = 0x0 | ACK_FLAG;
 			uint8_t hdr_len = 0x50;
 			unsigned short rwnd = htons (512 * 100);
 			unsigned short checksum = 0;
@@ -667,7 +667,6 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 
 			if (ACK)
 			{
-
 			}
 		}
 		break;
