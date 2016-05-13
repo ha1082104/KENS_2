@@ -186,10 +186,9 @@ void TCPAssignment::syscall_close (UUID syscallUUID, int pid, int fd)
 		this->returnSystemCall (syscallUUID, 0);
 	}
 }
-
-void TCPAssignment::syscall_read (UUID syscallUUID, int pid, int sockfd, void *buffer, int length)
+void TCPAssignment::syscall_read (UUID syscallUUID, int pid, int sockfd, void* recv_buffer, int length)
 {
-	fprintf (stderr, "read call!\n");
+	fprintf (stderr, "read call\n");
 }
 
 void TCPAssignment::syscall_write (UUID syscallUUID, int pid, int sockfd, const void *send_buffer, int length)
@@ -625,7 +624,6 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 					current_context->tcp_state = E::ESTABLISHED;
 					current_context->seq_num = current_context->seq_num + 1;
 					current_context->ack_num = recv_seq_num + 1;
-					fprintf (stderr, "ack num is %d\n", current_context->ack_num);
 					this->returnSystemCall (current_context->wake_args.syscallUUID, 0);
 				}
 				

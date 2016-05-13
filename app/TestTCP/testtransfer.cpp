@@ -153,6 +153,7 @@ protected:
 		free(send_buffer);
 		free(recv_buffer);
 
+		fprintf (stderr, "expect size is %d, total size is %d\n", expect_size, total_size);
 		EXPECT_EQ(expect_size, total_size);
 
 		close(client_fd);
@@ -666,8 +667,6 @@ TEST_F(TestEnv_Any, TestTransfer_Accept_Send_EOF)
 
 	this->runTest();
 }
-
-//---------
 
 TEST_F(TestEnv_Any, TestTransfer_Accept_Recv_Symmetric)
 {
