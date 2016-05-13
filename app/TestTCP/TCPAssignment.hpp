@@ -131,7 +131,7 @@ private:
 	void syscall_getsockname (UUID, int, int, struct sockaddr *, socklen_t *);
 	void syscall_getpeername (UUID, int, int, struct sockaddr *, socklen_t *);
 	std::list< struct tcp_context >::iterator find_tcp_context (int, int);
-	unsigned short calculate_checksum (unsigned int, unsigned int, struct tcp_header);
+	unsigned short calculate_checksum (unsigned int, unsigned int, struct tcp_header, unsigned short *, int);
 	std::list< struct tcp_context >::iterator get_context_addr_port (unsigned int, unsigned int, unsigned short, unsigned short);
 	std::list< struct tcp_context >::iterator find_pending_context (int, std::list< struct tcp_context > *);
 	void remove_tcp_context (int, int);

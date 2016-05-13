@@ -87,7 +87,6 @@ protected:
 
 		long sleep_time = start_time - (1000*1000*tv.tv_sec) - tv.tv_usec;
 		EXPECT_GE(sleep_time, 0);
-		//printf("connect sleep: %ld\n", sleep_time);
 		usleep(sleep_time);
 
 		unsigned int seed = atoi(env["RANDOM_SEED"].c_str());
@@ -153,7 +152,6 @@ protected:
 		free(send_buffer);
 		free(recv_buffer);
 
-		fprintf (stderr, "expect size is %d, total size is %d\n", expect_size, total_size);
 		EXPECT_EQ(expect_size, total_size);
 
 		close(client_fd);
@@ -308,15 +306,15 @@ TEST_F(TestEnv_Any, TestTransfer_Connect_Send_Symmetric)
 
 	connect_env["CONNECT_ADDR"] = host2_ip;
 	connect_env["BUFFER_SIZE"] = "1024";
-	connect_env["LOOP_COUNT"] = "20";
+	connect_env["LOOP_COUNT"] = "128";
 	connect_env["SENDER"] = "1";
-	connect_env["EXPECT_SIZE"] = "20480";
+	connect_env["EXPECT_SIZE"] = "131072";
 	TestTransfer_Connect client(host1, connect_env);
 
 	accept_env["SENDER"] = "0";
 	accept_env["BUFFER_SIZE"] = "1024";
-	accept_env["LOOP_COUNT"] = "20";
-	accept_env["EXPECT_SIZE"] = "20480";
+	accept_env["LOOP_COUNT"] = "128";
+	accept_env["EXPECT_SIZE"] = "131072";
 	TestTransfer_Accept server(host2, accept_env);
 
 	server.initialize();

@@ -25,6 +25,7 @@
 #define MSL 60000
 #define ALPHA (double) 0.125
 #define BETA (double) 0.25
+#define MAX_BUF_SIZE 51200
 
 namespace E
 {
@@ -137,7 +138,7 @@ void TCPAssignment::syscall_close (UUID syscallUUID, int pid, int fd)
 		fin_packet->writeData (50, &checksum, 2);
 
 		fin_packet->readData (34, &tmp_header, 20);
-		checksum = this->calculate_checksum (cursor->src_addr, cursor->dst_addr, tmp_header);
+		checksum = this->calculate_checksum (cursor->src_addr, cursor->dst_addr, tmp_header, NULL, 0);
 		fin_packet->writeData (50, &checksum, 2);
 
 		// cursor->seq_num = this->random_seq_num++;
@@ -150,7 +151,7 @@ void TCPAssignment::syscall_close (UUID syscallUUID, int pid, int fd)
 
 	else if (cursor->tcp_state == E::CLOSE_WAIT)
 	{
-		int seq_num = htonl (cursor->seq_num++);
+		int seq_num = htonl (this->random_seq_num);
 		uint8_t hdr_len = 0x50;
 		uint8_t sending_flag = 0x0 | FIN_FLAG;
 		unsigned short checksum = 0;
@@ -168,10 +169,10 @@ void TCPAssignment::syscall_close (UUID syscallUUID, int pid, int fd)
 		fin_packet->writeData (50, &checksum, 2);
 
 		fin_packet->readData (34, &tmp_header, 20);
-		checksum = this->calculate_checksum (cursor->src_addr, cursor->dst_addr, tmp_header);
+		checksum = this->calculate_checksum (cursor->src_addr, cursor->dst_addr, tmp_header, NULL, 0);
 		fin_packet->writeData (50, &checksum, 2);
 
-		// cursor->seq_num = this->random_seq_num++;
+		cursor->seq_num = this->random_seq_num++;
 		cursor->tcp_state = E::LAST_ACK;
 		cursor->wake_args.syscallUUID = syscallUUID;
 
@@ -186,9 +187,8 @@ void TCPAssignment::syscall_close (UUID syscallUUID, int pid, int fd)
 		this->returnSystemCall (syscallUUID, 0);
 	}
 }
-void TCPAssignment::syscall_read (UUID syscallUUID, int pid, int sockfd, void* recv_buffer, int length)
+void TCPAssignment::syscall_read (UUID syscallUUID, int pid, int sockfd, void *buffer, int length)
 {
-	fprintf (stderr, "read call\n");
 }
 
 void TCPAssignment::syscall_write (UUID syscallUUID, int pid, int sockfd, const void *send_buffer, int length)
@@ -224,6 +224,16 @@ void TCPAssignment::syscall_write (UUID syscallUUID, int pid, int sockfd, const 
 			unsigned short checksum = 0;
 			struct tcp_header tmp_header;
 
+			unsigned short *data_buf = (unsigned short *) malloc (sending_bytes);
+			int data_length = sending_bytes;
+
+			if (data_length % 2 == 1)
+				data_length = (data_length + 1) / 2;
+			else
+				data_length /= 2;
+
+			memcpy (data_buf, send_buffer + sent_bytes, sending_bytes);
+
 			Packet *data_packet = this->allocatePacket (54 + sending_bytes);
 
 			data_packet->writeData (26, &current_context->src_addr, 4);
@@ -238,9 +248,11 @@ void TCPAssignment::syscall_write (UUID syscallUUID, int pid, int sockfd, const 
 			data_packet->writeData (50, &checksum, 2);
 
 			data_packet->readData (34, &tmp_header, 20);
-			checksum = this->calculate_checksum (current_context->src_addr, current_context->dst_addr, tmp_header);
+			checksum = this->calculate_checksum (current_context->src_addr, current_context->dst_addr, tmp_header, data_buf, data_length);
 			data_packet->writeData (50, &checksum, 2);
 			data_packet->writeData (54, send_buffer + sent_bytes, sending_bytes);
+
+			this->sendPacket ("IPv4", data_packet);
 
 			seq_num = ntohl (seq_num);
 
@@ -252,14 +264,14 @@ void TCPAssignment::syscall_write (UUID syscallUUID, int pid, int sockfd, const 
 			sent_pkt.data_length = sending_bytes;
 			sent_pkt.sent_time = this->getHost ()->getSystem ()->getCurrentTime ();
 
-			// add timer only for first packet 
 			if (loop == 0)	
 			{
 				UUID timerUUID;
 				
-				struct timer_arguments *timer_args = (struct timer_arguments *) malloc (sizeof (struct timer_arguments));																									
-				timer_args->pid = current_context->pid;
-				timer_args->sockfd = current_context->sockfd;
+				struct timer_arguments *timer_args = (struct timer_arguments *) malloc (sizeof (struct timer_arguments));																
+
+				timer_args->pid = pid;
+				timer_args->sockfd = sockfd;
 				timer_args->seq_num = seq_num;
 				double timeoutInterval = get_timeout_interval (current_context);
 
@@ -268,7 +280,6 @@ void TCPAssignment::syscall_write (UUID syscallUUID, int pid, int sockfd, const 
 				current_context->transfer_timerUUID = timerUUID;
 			}
 
-			this->sendPacket ("IPv4", data_packet);
 			current_context->send_buffer.push_back (sent_pkt);
 
 			remain_bytes -= sending_bytes;
@@ -334,7 +345,7 @@ void TCPAssignment::syscall_connect (UUID syscallUUID, int pid, int sockfd, stru
 	syn_packet->writeData (50, &checksum, 2);
 
 	syn_packet->readData (34, &tmp_header, 20);
-	checksum = this->calculate_checksum (entry->src_addr, serv_addr_v4->sin_addr.s_addr, tmp_header);
+	checksum = this->calculate_checksum (entry->src_addr, serv_addr_v4->sin_addr.s_addr, tmp_header, NULL, 0);
 	syn_packet->writeData (50, &checksum, 2);
 
 	this->sendPacket ("IPv4", syn_packet);
@@ -549,7 +560,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 				syn_ack_packet->writeData (50, &checksum, 2);
 
 				syn_ack_packet->readData (34, &tmp_header, 20);
-				checksum = this->calculate_checksum (dst_addr, src_addr, tmp_header);
+				checksum = this->calculate_checksum (dst_addr, src_addr, tmp_header, NULL, 0);
 				syn_ack_packet->writeData (50, &checksum, 2);
 
 				this->sendPacket ("IPv4", syn_ack_packet);
@@ -565,6 +576,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 
 				current_context->pending_conn_list.erase (entry);
 				new_context.tcp_state = E::ESTABLISHED;
+				new_context.ack_num = recv_seq_num;
 				current_context->estab_conn_list.push_back (new_context);
 
 				if (current_context->to_be_accepted)
@@ -577,6 +589,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 					connfd = this->createFileDescriptor (current_context->pid);
 					estab_context.pid = current_context->pid;
 					estab_context.sockfd = connfd;
+					estab_context.seq_num++;
 					addr_v4->sin_family = AF_INET;
 					addr_v4->sin_addr.s_addr = estab_context.src_addr;
 					addr_v4->sin_port = estab_context.src_port;
@@ -611,7 +624,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 				ack_packet->writeData (50, &checksum, 2);
 
 				ack_packet->readData (34, &tmp_header, 20);
-				checksum = this->calculate_checksum (dst_addr, src_addr, tmp_header);
+				checksum = this->calculate_checksum (dst_addr, src_addr, tmp_header, NULL, 0);
 				ack_packet->writeData (50, &checksum, 2);
 
 				this->sendPacket ("IPv4", ack_packet);
@@ -656,7 +669,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 				ack_packet->writeData (50, &checksum, 2);
 				
 				ack_packet->readData (34, &tmp_header, 20);
-				checksum = calculate_checksum (dst_addr, src_addr, tmp_header);
+				checksum = calculate_checksum (dst_addr, src_addr, tmp_header, NULL, 0);
 				ack_packet->writeData (50, &checksum, 2);
 
 				current_context->tcp_state = E::CLOSE_WAIT;
@@ -691,7 +704,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 				ack_packet->writeData (50, &checksum, 2);
 
 				ack_packet->readData (34, &tmp_header, 20);
-				checksum = calculate_checksum (dst_addr, src_addr, tmp_header);
+				checksum = calculate_checksum (dst_addr, src_addr, tmp_header, NULL, 0);
 				ack_packet->writeData (50, &checksum, 2);
 				this->sendPacket ("IPv4", ack_packet);
 
@@ -734,7 +747,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 				ack_packet->writeData (50, &checksum, 2);
 
 				ack_packet->readData (34, &tmp_header, 20);
-				checksum = this->calculate_checksum (dst_addr, src_addr, tmp_header);
+				checksum = this->calculate_checksum (dst_addr, src_addr, tmp_header, NULL, 0);
 				ack_packet->writeData (50, &checksum, 2);
 
 				current_context->tcp_state = E::TIME_WAIT;
@@ -805,7 +818,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 				ack_packet->writeData (50, &checksum, 2);
 				
 				ack_packet->readData (34, &tmp_header, 20);
-				checksum = calculate_checksum (dst_addr, src_addr, tmp_header);
+				checksum = calculate_checksum (dst_addr, src_addr, tmp_header, NULL, 0);
 				ack_packet->writeData (50, &checksum, 2);
 
 				this->sendPacket ("IPv4", ack_packet);
@@ -833,7 +846,7 @@ void TCPAssignment::timerCallback(void* payload)
 
 	if (entry->tcp_state == E::ESTABLISHED)
 	{
-		/* Retransmission */
+		/* Retransmission needed */
 	}
 
 	else
@@ -857,7 +870,7 @@ struct pseudo_header
 	struct tcp_header tcpheader;
 }__attribute__((packed));
 
-unsigned short TCPAssignment::calculate_checksum (unsigned int src, unsigned int dst, struct tcp_header theader)
+unsigned short TCPAssignment::calculate_checksum (unsigned int src, unsigned int dst, struct tcp_header theader, unsigned short *data_buf, int data_length)
 {
 	uint32_t sum = 0;
 
@@ -870,10 +883,19 @@ unsigned short TCPAssignment::calculate_checksum (unsigned int src, unsigned int
 	memcpy (&pheader.tcpheader, &theader, sizeof (struct tcp_header));
 
 	unsigned short *buf = (unsigned short *) &pheader;
+	
 	int len = sizeof (struct pseudo_header) / sizeof (unsigned short);
 
 	while (len--)
 		sum += *buf++;
+
+	if (data_buf != NULL)
+	{
+		while (data_length--)
+			sum += *data_buf++;
+
+		sum += 2;
+	}
 
 	sum = (sum >> 16) + (sum & 0xffff);
 	sum += (sum >> 16);
