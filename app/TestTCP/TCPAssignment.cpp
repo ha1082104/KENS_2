@@ -64,7 +64,7 @@ void TCPAssignment::systemCallback(UUID syscallUUID, int pid, const SystemCallPa
 		this->syscall_close(syscallUUID, pid, param.param1_int);
 		break;
 	case READ:
-		//this->syscall_read(syscallUUID, pid, param.param1_int, param.param2_ptr, param.param3_int);
+		this->syscall_read(syscallUUID, pid, param.param1_int, param.param2_ptr, param.param3_int);
 		break;
 	case WRITE:
 		this->syscall_write(syscallUUID, pid, param.param1_int, param.param2_ptr, param.param3_int);
@@ -185,6 +185,10 @@ void TCPAssignment::syscall_close (UUID syscallUUID, int pid, int fd)
 		this->removeFileDescriptor (pid, fd);
 		this->returnSystemCall (syscallUUID, 0);
 	}
+}
+void TCPAssignment::syscall_read (UUID syscallUUID, int pid, int sockfd, void* recv_buffer, int length)
+{
+	
 }
 
 void TCPAssignment::syscall_write (UUID syscallUUID, int pid, int sockfd, const void *send_buffer, int length)
@@ -655,6 +659,13 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 
 			if (ACK)
 				fprintf (stderr, "########### success ##########\n");
+			else
+			{
+				// data packet from client!
+				// TODO: save packet's data to buffer
+				// TODO: send ACK packet's to client -> little bit complicated.
+			}
+
 		}
 		break;
 

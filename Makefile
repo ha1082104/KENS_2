@@ -53,6 +53,10 @@ test_part4: test_part3
 	@echo "Note that passing this test does not mean that you are finished."
 	@echo "Check the pcap file that you have implemented congestion control well."
 
+test_dg: all
+	@echo "Running test cases for syscall_read..."
+	@build/testTCP --gtest_filter="TestEnv_Any.TestTransfer_Connect_Recv_Symmetric"
+
 doxygen:
 	doxygen doxygen/Doxyfile
 

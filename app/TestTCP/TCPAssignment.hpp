@@ -121,6 +121,7 @@ private:
 	void syscall_socket (UUID, int, int, int);
 	void syscall_close (UUID, int, int);
 	void syscall_write (UUID, int, int, const void *, int);
+	void syscall_read (UUID, int, int, void*, int);
 	void syscall_connect (UUID, int, int, struct sockaddr *, socklen_t addrlen);
 	void syscall_listen (UUID, int, int, int);
 	void syscall_accept (UUID, int, int, struct sockaddr *, socklen_t *);
