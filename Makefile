@@ -25,8 +25,6 @@ clean:
 	done
 
 depend:
-	@$(MAKE) --directory=src depend
-	@for dir in $(SRCDIR)/*; do \
 		if [ -f $$dir/Makefile ]; then \
 			$(MAKE) --directory=$$dir depend; \
 		fi ; \
@@ -55,11 +53,11 @@ test_part4: test_part3
 
 test_dg: all
 	@echo "Running test cases for syscall_read..."
-	@build/testTCP --gtest_filter="TestEnv_Any.TestTransfer_Connect_Recv_Symmetric"
+	@build/testTCP --gtest_filter="TestEnv_Any.TestTransfer_Connect_Recv_SmallBuffer2"
 
 test_jh: all
-	@echo "Running test cases for syscall_write..."
-	@build/testTCP --gtest_filter="TestEnv_Any.TestTransfer_Accept_Send_Symmetric"
+	@echo "Running test cases for syscall_read..."
+	@build/testTCP --gtest_filter="TestEnv_Any.TestTransfer_Connect_Recv_Symmetric"
 
 doxygen:
 	doxygen doxygen/Doxyfile

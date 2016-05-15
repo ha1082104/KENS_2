@@ -26,6 +26,7 @@
 #define ALPHA (double) 0.125
 #define BETA (double) 0.25
 #define MAX_BUF_SIZE 51200
+#define MAX_WINDOW_SIZE 51200
 
 namespace E
 {
@@ -120,6 +121,7 @@ void TCPAssignment::syscall_close (UUID syscallUUID, int pid, int fd)
 	if (cursor->tcp_state == E::ESTABLISHED)
 	{
 		int seq_num = htonl (cursor->seq_num++);
+		cursor->fin_num = cursor->seq_num;
 		uint8_t hdr_len = 0x50;
 		uint8_t sending_flag = 0x0 | FIN_FLAG;
 		unsigned short checksum = 0;
@@ -189,6 +191,64 @@ void TCPAssignment::syscall_close (UUID syscallUUID, int pid, int fd)
 }
 void TCPAssignment::syscall_read (UUID syscallUUID, int pid, int sockfd, void *buffer, int length)
 {
+	std::list< struct tcp_context >::iterator current_context = find_tcp_context (pid, sockfd);
+
+	/* blocking */
+	if (total_data_in_buffer (current_context->recv_buffer) == 0)
+	{
+		current_context->is_read_call = true;
+		current_context->wake_args.syscallUUID = syscallUUID;
+		current_context->wake_args.buffer = buffer;
+		current_context->wake_args.length = length;
+		return;
+	}
+
+	else
+	{
+		int i, read_bytes = 0;
+
+		if (total_data_in_buffer (current_context->recv_buffer) > length)
+		{
+			int index = find_index (current_context->recv_buffer, length);
+			struct recv_packet entry;
+
+			for (i = 0; i < index; i++)
+			{
+				entry = current_context->recv_buffer.front ();
+				entry.packet->readData (54 + entry.data_position, buffer + read_bytes, entry.data_length - entry.data_position);
+				read_bytes += entry.data_length - entry.data_position;
+				length -= entry.data_length - entry.data_position;
+				entry.data_position += entry.data_length - entry.data_position;
+
+				current_context->recv_buffer.pop_front ();
+			}
+			
+			struct recv_packet *last_entry = &current_context->recv_buffer.front ();
+			last_entry->packet->readData (54 + last_entry->data_position, buffer + read_bytes, length);
+			read_bytes += length;
+			last_entry->data_position += length;
+
+			this->returnSystemCall (syscallUUID, read_bytes);
+		}
+
+		else
+		{
+			int list_size = current_context->recv_buffer.size ();
+			struct recv_packet entry;
+
+			for (i = 0; i < list_size; i++)
+			{
+				entry = current_context->recv_buffer.front ();
+				entry.packet->readData (54 + entry.data_position, buffer + read_bytes, entry.data_length - entry.data_position);
+				read_bytes += entry.data_length - entry.data_position;
+				entry.data_position += entry.data_length - entry.data_position;
+
+				current_context->recv_buffer.pop_front ();
+			}
+
+			this->returnSystemCall (syscallUUID, read_bytes);
+		}
+	}
 }
 
 void TCPAssignment::syscall_write (UUID syscallUUID, int pid, int sockfd, const void *send_buffer, int length)
@@ -493,7 +553,6 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 {
 	unsigned int src_addr;
 	unsigned int dst_addr;
-	unsigned short checksum = 0;
 	uint8_t IHL;
 	int recv_seq_num, recv_ack_num;
 	bool FIN, SYN, ACK;
@@ -653,10 +712,10 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 				/* this is server-side and send ACK packet */
 				int ack_num = htonl (recv_seq_num + 1);
 				uint8_t hdr_len = 0x50;
-				uint8_t sending_flag = 0x0 | FIN_FLAG;
+				uint8_t sending_flag = 0x0 | ACK_FLAG;
 				unsigned short checksum = 0;
 				struct tcp_header tmp_header;
-				
+
 				Packet *ack_packet = this->allocatePacket (54);
 				
 				ack_packet->writeData (26, &dst_addr, 4);
@@ -678,6 +737,112 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 
 			if (ACK)
 			{
+				int data_length = packet->getSize () - 54;
+
+				/* server */
+				if (data_length > 0)
+				{
+					// while (remain_window_size (current_context->recv_buffer) <= 0) {}
+
+					struct recv_packet recv_pkt;
+					recv_pkt.packet = this->clonePacket (packet);
+					recv_pkt.recv_seq = recv_seq_num;
+					recv_pkt.data_length = data_length;
+
+					insert_recv_packet (&current_context->recv_buffer, recv_pkt);
+
+					uint8_t hdr_len = 0x50;
+					uint8_t sending_flag = 0x0 | ACK_FLAG;
+					unsigned short checksum = 0;
+					unsigned short rwnd = htons (remain_window_size (current_context->recv_buffer));
+
+					struct tcp_header tmp_header;
+
+					int seq_num = htonl (current_context->seq_num);
+					int ack_num = htonl (recv_seq_num + data_length);
+
+					Packet *ack_packet = this->allocatePacket (54);
+
+					ack_packet->writeData (26, &dst_addr, 4);
+					ack_packet->writeData (30, &src_addr, 4);
+					ack_packet->writeData (34, &recv_tcp_header->dst_port, 2);
+					ack_packet->writeData (36, &recv_tcp_header->src_port, 2);
+					ack_packet->writeData (38, &seq_num, 4);
+					ack_packet->writeData (42, &ack_num, 4); // TODO: ack_number func
+					ack_packet->writeData (46, &hdr_len, 1);
+					ack_packet->writeData (47, &sending_flag, 1);
+					ack_packet->writeData (48, &rwnd, 2);
+					ack_packet->writeData (50, &checksum, 2);
+
+					ack_packet->readData (34, &tmp_header, 20);
+					checksum = this->calculate_checksum (dst_addr, src_addr, tmp_header, NULL, 0);
+					ack_packet->writeData (50, &checksum, 2);
+
+					this->sendPacket ("IPv4", ack_packet);
+
+					/* If there is a pending read call */
+					if (current_context->is_read_call)
+					{
+						if (total_data_in_buffer (current_context->recv_buffer) != 0)
+						{
+							void *buffer = current_context->wake_args.buffer;
+							int length = current_context->wake_args.length;
+							int read_bytes = 0;
+
+							if (total_data_in_buffer (current_context->recv_buffer) > length)
+							{
+								int index = find_index (current_context->recv_buffer, length);
+								int i;
+								struct recv_packet entry;
+
+								for (i = 0; i < index; i++)
+								{
+									entry = current_context->recv_buffer.front ();
+									entry.packet->readData (54 + entry.data_position, buffer + read_bytes, entry.data_length - entry.data_position);
+									read_bytes += entry.data_length - entry.data_position;
+									length -= entry.data_length - entry.data_position;
+									entry.data_position += entry.data_length - entry.data_position;
+	
+									current_context->recv_buffer.pop_front ();
+								}
+
+								struct recv_packet *last_read_packet = &(current_context->recv_buffer.front ());
+								last_read_packet->packet->readData (54 + last_read_packet->data_position, buffer + read_bytes, length);
+								last_read_packet->data_position += length;
+								read_bytes += length;
+
+								current_context->is_read_call = false;
+								this->returnSystemCall (current_context->wake_args.syscallUUID, length);
+							}
+
+							else
+							{
+								int list_size = current_context->recv_buffer.size ();
+								int i;
+								struct recv_packet entry;
+
+								for (i = 0; i < list_size; i++)
+								{
+									entry = current_context->recv_buffer.front ();
+									entry.packet->readData (54 + entry.data_position, buffer + read_bytes, entry.data_length - entry.data_position);
+									read_bytes += entry.data_length - entry.data_position;
+									entry.data_position += entry.data_length - entry.data_position;
+									
+									current_context->recv_buffer.pop_front ();
+								}
+
+								current_context->is_read_call = false;
+								this->returnSystemCall (current_context->wake_args.syscallUUID, read_bytes);
+							}
+						}
+					}
+				}
+
+				/* client */
+				else
+				{
+
+				}
 			}
 		}
 		break;
@@ -685,10 +850,20 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 		case E::FIN_WAIT_1:
 		{
 			if (ACK)
-				current_context->tcp_state = E::FIN_WAIT_2;
+			{
+				if (current_context->fin_num == recv_ack_num)
+					current_context->tcp_state = E::FIN_WAIT_2;
+
+				/* client */
+				else
+				{
+
+				}
+			}
 
 			if (FIN)
 			{
+				int seq_num = htonl (current_context->seq_num++);
 				int ack_num = htonl (recv_seq_num + 1);
 				uint8_t sending_flag = 0x0 | ACK_FLAG;
 				unsigned short checksum = 0;
@@ -699,6 +874,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 				ack_packet->writeData (30, &src_addr, 4);
 				ack_packet->writeData (34, &recv_tcp_header->dst_port, 2);
 				ack_packet->writeData (36, &recv_tcp_header->src_port, 2);
+				ack_packet->writeData (38, &seq_num, 4);
 				ack_packet->writeData (42, &ack_num, 4);
 				ack_packet->writeData (47, &sending_flag, 1);
 				ack_packet->writeData (50, &checksum, 2);
@@ -731,6 +907,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 		{
 			if (FIN)
 			{
+				int seq_num = htonl (current_context->seq_num++);
 				int ack_num = htonl (recv_seq_num + 1);
 				uint8_t sending_flag = 0x0 | ACK_FLAG;
 				unsigned short checksum = 0;
@@ -742,6 +919,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 				ack_packet->writeData (14+16, &src_addr, 4);
 				ack_packet->writeData (34, &recv_tcp_header->dst_port, 2);
 				ack_packet->writeData (36, &recv_tcp_header->src_port, 2);
+				ack_packet->writeData (38, &seq_num, 4);
 				ack_packet->writeData (42, &ack_num, 4);
 				ack_packet->writeData (47, &sending_flag, 1);
 				ack_packet->writeData (50, &checksum, 2);
@@ -982,6 +1160,65 @@ double TCPAssignment::get_timeout_interval (std::list< struct tcp_context >::ite
 	current_tcp_context->timeoutInterval = timeoutInterval;
 
 	return timeoutInterval;
+}
+
+void TCPAssignment::insert_recv_packet (std::list< struct recv_packet > *recv_list, struct recv_packet recv_pkt)
+{
+	std::list< struct recv_packet >::iterator cursor;
+
+	for (cursor = (*recv_list).begin (); cursor != (*recv_list).end (); cursor++)
+	{
+		if (cursor->recv_seq - recv_pkt.data_length == recv_pkt.recv_seq)
+		{
+			(*recv_list).insert (cursor, recv_pkt);
+			return;
+		}
+	};
+
+	if (cursor == (*recv_list).end ())
+		(*recv_list).push_back (recv_pkt);
+
+	return;
+}
+
+int TCPAssignment::total_data_in_buffer (std::list< struct recv_packet > recv_list)
+{
+	std::list< struct recv_packet >::iterator cursor;
+	int total_data = 0;
+
+	for (cursor = recv_list.begin (); cursor != recv_list.end (); cursor++)
+	{
+		total_data += cursor->data_length - cursor->data_position;
+	}
+
+	return total_data;
+}
+
+int TCPAssignment::remain_window_size (std::list< struct recv_packet > recv_list)
+{
+	int total_data = total_data_in_buffer (recv_list);
+
+	return (MAX_WINDOW_SIZE - total_data);
+}
+
+int TCPAssignment::find_index (std::list< struct recv_packet > recv_list, int length)
+{
+	std::list< struct recv_packet >::iterator cursor;
+	int index = 0;
+
+	for (cursor = recv_list.begin (); cursor != recv_list.end (); cursor++)
+	{
+		if (length < cursor->data_length - cursor->data_position)
+			return index;
+
+		else
+		{
+			length -= cursor->data_length - cursor->data_position;
+			index++;
+		}
+	}
+
+	return index;
 }
 
 }

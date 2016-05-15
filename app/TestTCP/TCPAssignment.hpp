@@ -43,6 +43,10 @@ namespace E
 		UUID syscallUUID;
 		struct sockaddr *addr;
 		socklen_t *addrlen;
+
+		/* for read call */
+		void *buffer;
+		int length;
 	};
 
 	struct timer_arguments
@@ -65,6 +69,7 @@ namespace E
 	   int backlog;
 		int seq_num;
 		int ack_num;
+		int fin_num;
 		int to_be_accepted = 0;
 		std::list< struct tcp_context > pending_conn_list;
 		std::list< struct tcp_context > estab_conn_list;
@@ -72,6 +77,7 @@ namespace E
 
 		/* for transfer */
 		std::list< struct sent_packet > send_buffer;
+		std::list< struct recv_packet > recv_buffer;
 		unsigned short peer_window;
 		double estimatedRTT = 100;
 		double sampleRTT = 100;
@@ -79,6 +85,7 @@ namespace E
 		double timeoutInterval = 0;
 		double timeVar = 100;
 		UUID transfer_timerUUID;
+		bool is_read_call = false;
 	};
 
 	struct tcp_header
@@ -103,6 +110,14 @@ namespace E
 		int data_start = 0;
 		int data_length = 0;
 		double sent_time;
+	};
+
+	struct recv_packet
+	{
+		Packet *packet;
+		unsigned int recv_seq = 0;
+		int data_length = 0;
+		int data_position = 0;				// 0 <= data_position <= data_length
 	};
 
 class TCPAssignment : public HostModule, public NetworkModule, public SystemCallInterface, private NetworkLog, private TimerModule
@@ -137,6 +152,10 @@ private:
 	void remove_tcp_context (int, int);
 	bool insert_sent_packet (struct sent_packet **, struct sent_packet *);
 	double get_timeout_interval (std::list< struct tcp_context >::iterator);
+	void insert_recv_packet (std::list< struct recv_packet > *, struct recv_packet);
+	int remain_window_size (std::list< struct recv_packet >);
+	int total_data_in_buffer (std::list< struct recv_packet >);
+	int find_index (std::list< struct recv_packet >, int);
 
 public:
 	TCPAssignment(Host* host);
