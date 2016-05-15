@@ -1071,7 +1071,7 @@ void TCPAssignment::timerCallback(void* payload)
 	{
 		/* Retransmission needed */
 		//TODO: core dumped -> maybe NULL? or something else..
-		Packet* retrans_packet = this->clonePacket (find_retransmit_packet(entry->send_buffer, ((struct timer_arguments*)payload)->seq_num));
+		Packet* retrans_packet = this->clonePacket (find_retransmit_packet (entry->send_buffer, ((struct timer_arguments *) payload)->seq_num));
 		this->sendPacket ("IPv4", retrans_packet);
 	}
 
@@ -1300,7 +1300,7 @@ void TCPAssignment::insert_recv_packet (std::list< struct recv_packet > *recv_li
 
 	for (cursor = (*recv_list).begin (); cursor != (*recv_list).end (); cursor++)
 	{
-		if (cursor->recv_seq - recv_pkt.data_length == recv_pkt.recv_seq)
+		if (recv_pkt.recv_seq < cursor->recv_seq)
 		{
 			(*recv_list).insert (cursor, recv_pkt);
 			return;
@@ -1367,7 +1367,7 @@ int TCPAssignment::find_index (std::list< struct recv_packet > recv_list, int le
 	return index;
 }
 
-Packet* TCPAssignment::find_retransmit_packet(std::list< struct sent_packet > send_buffer, unsigned int seq_num)
+Packet *TCPAssignment::find_retransmit_packet (std::list< struct sent_packet > *send_buffer, unsigned int seq_num)
 {
 	std::list< struct sent_packet >::iterator cursor;
 	

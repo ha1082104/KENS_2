@@ -61,7 +61,7 @@ test_cg: all
 
 test_jh: all
 	@echo "Running test cases for syscall_read..."
-	@build/testTCP --gtest_filter="TestEnv_Any.TestTransfer_Connect_Recv_Symmetric"
+	@build/testTCP --gtest_filter="TestEnv_Any.TestTransfer_Accept_Recv_Symmetric"
 
 doxygen:
 	doxygen doxygen/Doxyfile

@@ -168,8 +168,9 @@ private:
 	int remain_window_size (std::list< struct recv_packet >);
 	int total_data_in_buffer (std::list< struct recv_packet >);
 	int find_index (std::list< struct recv_packet >, int);
+	int find_index_readable_packet (std::list< struct recv_packet >);
 
-	Packet* find_retransmit_packet (std::list< struct sent_packet >, unsigned int seq_num);
+	Packet *find_retransmit_packet (std::list< struct sent_packet >, unsigned int seq_num);
 public:
 	TCPAssignment(Host* host);
 	virtual void initialize();
