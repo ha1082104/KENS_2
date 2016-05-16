@@ -153,7 +153,10 @@ private:
 	std::list< struct tcp_context >::iterator find_pending_context (int, std::list< struct tcp_context > *);
 	void remove_tcp_context (int, int);
 	bool insert_sent_packet (struct sent_packet **, struct sent_packet *);
+	
 	double get_timeout_interval (std::list< struct tcp_context >::iterator);
+	double get_sampleRTT (std::list< struct sent_packet >, unsigned int);
+	void reset_timer (std::list< struct tcp_context >::iterator);
 
 	void remove_acked_packet (std::list< struct sent_packet >*);
 	void check_acked_packet (std::list< struct sent_packet >*, unsigned int);

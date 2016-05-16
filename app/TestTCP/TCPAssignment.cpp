@@ -336,7 +336,6 @@ void TCPAssignment::syscall_write (UUID syscallUUID, int pid, int sockfd, const 
 
 			if (loop == 0)	
 			{
-				std::cout<<"time setting\n";
 				UUID timerUUID;
 				
 				struct timer_arguments *timer_args = (struct timer_arguments *) malloc (sizeof (struct timer_arguments));																
@@ -860,7 +859,12 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 						current_context->is_write_call = false;
 						this->returnSystemCall (current_context->transfer_writeUUID, 0);
 					}
+					
+					current_context->sampleRTT = get_sampleRTT (current_context->send_buffer, recv_ack_num);
+					this->cancelTimer(current_context->transfer_timerUUID);
+	
 					check_acked_packet (&current_context->send_buffer, recv_ack_num);
+					reset_timer (current_context);
 					remove_acked_packet (&current_context->send_buffer);	
 				}
 			}
@@ -883,7 +887,12 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 						current_context->is_write_call = false;
 						this->returnSystemCall (current_context->transfer_writeUUID, 0);
 					}
+
+					current_context->sampleRTT = get_sampleRTT (current_context->send_buffer, recv_ack_num);
+					this->cancelTimer(current_context->transfer_timerUUID);
+
 					check_acked_packet (&current_context->send_buffer, recv_ack_num);
+					reset_timer (current_context);
 					remove_acked_packet (&current_context->send_buffer);		
 				}
 			}
@@ -1050,12 +1059,11 @@ void TCPAssignment::timerCallback(void* payload)
 	//std::cout<<"hello~ state: "<<entry->tcp_state<<std::endl;
 	std::list< struct tcp_context >::iterator entry = this->find_tcp_context (((struct timer_arguments *) payload)->pid, ((struct timer_arguments *) payload)->sockfd);
 
-	std::cout<<"hello~ state: "<<entry->tcp_state<<std::endl;
+	//std::cout<<"hello~ state: "<<entry->tcp_state<<" seq_num: "<<((struct timer_arguments*)payload)->seq_num<<std::endl;
 
 	if (entry->tcp_state == E::ESTABLISHED || entry->tcp_state == E::FIN_WAIT_1)
 	{
 		/* Retransmission needed */
-		std::cout<<"hello~\n";
 	}
 
 	else
@@ -1191,6 +1199,43 @@ double TCPAssignment::get_timeout_interval (std::list< struct tcp_context >::ite
 	current_tcp_context->timeoutInterval = timeoutInterval;
 
 	return timeoutInterval;
+}
+
+double TCPAssignment::get_sampleRTT (std::list< struct sent_packet > send_buffer, unsigned int ack_num)
+{
+	std::list< struct sent_packet >::iterator cursor;
+
+	double sampleRTT = 0;
+
+	for (cursor = send_buffer.begin(); cursor != send_buffer.end(); cursor++)
+	{
+		if (cursor->expect_ack == ack_num)
+			sampleRTT = this->getHost()->getSystem()->getCurrentTime() - cursor->sent_time;
+	}
+	
+	return sampleRTT;
+}
+
+void TCPAssignment::reset_timer (std::list< struct tcp_context >::iterator current_context)
+{
+	struct timer_arguments *timer_args = (struct timer_arguments*) malloc (sizeof (struct timer_arguments));
+	timer_args->pid = current_context->pid;
+	timer_args->sockfd = current_context->sockfd;
+	
+	std::list< struct sent_packet >::iterator cursor;
+
+	for (cursor = (current_context->send_buffer).begin();
+		cursor != (current_context->send_buffer).end(); cursor++)
+	{
+		if (!cursor->acked)
+		{
+			timer_args->seq_num = cursor->sent_seq;
+			break;
+		}
+	}
+	double timeoutInterval = get_timeout_interval(current_context);
+	UUID timerUUID = this->addTimer ((void*) timer_args, this->getHost()->getSystem()->getCurrentTime() + timeoutInterval);
+	current_context->transfer_timerUUID = timerUUID;
 }
 
 void TCPAssignment::remove_acked_packet (std::list< struct sent_packet >* send_buffer)
