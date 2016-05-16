@@ -15,6 +15,7 @@
 #include "TCPAssignment.hpp"
 #include <E/Networking/E_RoutingInfo.hpp>
 #include <list>
+#include <algorithm>
 
 #define FIN_FLAG 0x01
 #define SYN_FLAG 0x02
@@ -260,13 +261,22 @@ void TCPAssignment::syscall_write (UUID syscallUUID, int pid, int sockfd, const 
 
 	else
 	{
+		int unacked_bytes = unacked_data (current_context->send_buffer);
+		int capable_bytes = current_context->peer_window - unacked_bytes;
 		int remain_bytes = 0;
 		int sent_bytes = 0;
 
-		if (length > this->MSS * 5)
-			remain_bytes = this->MSS * 5;
-		else
+		if (capable_bytes <= this->MSS)
+		{
+			current_context->is_write_call = true;
+			current_context->transfer_writeUUID = syscallUUID;
+			return;
+		}
+
+		if (length < (remain_bytes = capable_bytes))
+		{
 			remain_bytes = length;
+		}
 
 		while (remain_bytes != 0)
 		{
@@ -276,8 +286,8 @@ void TCPAssignment::syscall_write (UUID syscallUUID, int pid, int sockfd, const 
 			if ((sending_bytes = this->MSS) > remain_bytes)
 				sending_bytes = remain_bytes;
 
-			int seq_num = htonl (current_context->seq_num);
-			int ack_num = htonl (current_context->ack_num);
+			uint32_t seq_num = htonl (current_context->seq_num);
+			uint32_t ack_num = htonl (current_context->ack_num);
 			uint8_t sending_flag = 0x0 | ACK_FLAG;
 			uint8_t hdr_len = 0x50;
 			unsigned short rwnd = htons (512 * 100);
@@ -318,14 +328,15 @@ void TCPAssignment::syscall_write (UUID syscallUUID, int pid, int sockfd, const 
 
 			struct sent_packet sent_pkt;
 			sent_pkt.packet = this->clonePacket (data_packet);
-			sent_pkt.sent_seq = seq_num;
-			sent_pkt.expect_ack = seq_num + sending_bytes;
+			sent_pkt.sent_seq = current_context->seq_num;
+			sent_pkt.expect_ack = current_context->seq_num + sending_bytes;
 			sent_pkt.data_start = sent_bytes;
 			sent_pkt.data_length = sending_bytes;
 			sent_pkt.sent_time = this->getHost ()->getSystem ()->getCurrentTime ();
 
 			if (loop == 0)	
 			{
+				std::cout<<"time setting\n";
 				UUID timerUUID;
 				
 				struct timer_arguments *timer_args = (struct timer_arguments *) malloc (sizeof (struct timer_arguments));																
@@ -345,6 +356,7 @@ void TCPAssignment::syscall_write (UUID syscallUUID, int pid, int sockfd, const 
 			remain_bytes -= sending_bytes;
 			sent_bytes += sending_bytes;
 			current_context->seq_num += sending_bytes;
+			current_context->peer_window -= sending_bytes;
 			loop++;
 		}
 
@@ -554,7 +566,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 	unsigned int src_addr;
 	unsigned int dst_addr;
 	uint8_t IHL;
-	int recv_seq_num, recv_ack_num;
+	unsigned int recv_seq_num, recv_ack_num;
 	bool FIN, SYN, ACK;
 	
 	/* For TCP Header */
@@ -578,6 +590,8 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 
 	if (current_context != this->tcp_context_list.end ())
 		state = current_context->tcp_state;
+
+	current_context->peer_window = ntohs(recv_tcp_header->recv_window);
 
 	switch (state)
 	{
@@ -841,7 +855,13 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 				/* client */
 				else
 				{
-
+					if (current_context->is_write_call)
+					{
+						current_context->is_write_call = false;
+						this->returnSystemCall (current_context->transfer_writeUUID, 0);
+					}
+					check_acked_packet (&current_context->send_buffer, recv_ack_num);
+					remove_acked_packet (&current_context->send_buffer);	
 				}
 			}
 		}
@@ -854,10 +874,17 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 				if (current_context->fin_num == recv_ack_num)
 					current_context->tcp_state = E::FIN_WAIT_2;
 
+				// TODO: I think server can enter this ACK part. Maybe we should distinguish server and client by data_size..
 				/* client */
 				else
 				{
-
+					if (current_context->is_write_call)
+					{
+						current_context->is_write_call = false;
+						this->returnSystemCall (current_context->transfer_writeUUID, 0);
+					}
+					check_acked_packet (&current_context->send_buffer, recv_ack_num);
+					remove_acked_packet (&current_context->send_buffer);		
 				}
 			}
 
@@ -1020,11 +1047,15 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 
 void TCPAssignment::timerCallback(void* payload)
 {
+	//std::cout<<"hello~ state: "<<entry->tcp_state<<std::endl;
 	std::list< struct tcp_context >::iterator entry = this->find_tcp_context (((struct timer_arguments *) payload)->pid, ((struct timer_arguments *) payload)->sockfd);
 
-	if (entry->tcp_state == E::ESTABLISHED)
+	std::cout<<"hello~ state: "<<entry->tcp_state<<std::endl;
+
+	if (entry->tcp_state == E::ESTABLISHED || entry->tcp_state == E::FIN_WAIT_1)
 	{
 		/* Retransmission needed */
+		std::cout<<"hello~\n";
 	}
 
 	else
@@ -1162,6 +1193,41 @@ double TCPAssignment::get_timeout_interval (std::list< struct tcp_context >::ite
 	return timeoutInterval;
 }
 
+void TCPAssignment::remove_acked_packet (std::list< struct sent_packet >* send_buffer)
+{
+	if (send_buffer->begin() != send_buffer->end())
+	{
+		while ((send_buffer->begin())->acked)
+		{
+			send_buffer->pop_front();
+			if (send_buffer->begin() == send_buffer->end())
+				return;
+		}
+	}
+	return;
+}
+
+void TCPAssignment::check_acked_packet (std::list< struct sent_packet >* send_buffer, unsigned int ack_num)
+{
+	std::list< struct sent_packet >::iterator cursor;
+
+	for (cursor = (*send_buffer).begin(); cursor != (*send_buffer).end(); cursor++)
+	{
+		if (cursor->expect_ack == ack_num)
+		{
+			cursor->acked = true;
+		}
+	}
+	if (cursor != (*send_buffer).end())
+	{
+		for (; cursor != (*send_buffer).begin(); cursor--)
+		{
+			cursor->acked = true;
+		}
+		cursor->acked = true;
+	}
+}
+
 void TCPAssignment::insert_recv_packet (std::list< struct recv_packet > *recv_list, struct recv_packet recv_pkt)
 {
 	std::list< struct recv_packet >::iterator cursor;
@@ -1179,6 +1245,20 @@ void TCPAssignment::insert_recv_packet (std::list< struct recv_packet > *recv_li
 		(*recv_list).push_back (recv_pkt);
 
 	return;
+}
+
+int TCPAssignment::unacked_data (std::list< struct sent_packet > send_buffer)
+{
+	std::list< struct sent_packet >::iterator cursor;
+	int unacked_data = 0;
+
+	for (cursor = send_buffer.begin(); cursor != send_buffer.end(); cursor++)
+	{
+		if (!cursor->acked)
+			unacked_data += cursor->data_length;
+	}
+
+	return unacked_data;
 }
 
 int TCPAssignment::total_data_in_buffer (std::list< struct recv_packet > recv_list)

@@ -66,9 +66,9 @@ namespace E
 		unsigned short src_port;
 		unsigned short dst_port;
 		bool is_bound = false;
-	   int backlog;
-		int seq_num;
-		int ack_num;
+	    int backlog;
+		unsigned int seq_num;
+		unsigned int ack_num;
 		int fin_num;
 		int to_be_accepted = 0;
 		std::list< struct tcp_context > pending_conn_list;
@@ -85,7 +85,9 @@ namespace E
 		double timeoutInterval = 0;
 		double timeVar = 100;
 		UUID transfer_timerUUID;
+		UUID transfer_writeUUID;
 		bool is_read_call = false;
+		bool is_write_call= false;
 	};
 
 	struct tcp_header
@@ -104,8 +106,8 @@ namespace E
 	struct sent_packet
 	{
 		Packet *packet;
-		unsigned int sent_seq = 0;
-		unsigned int expect_ack = 0;
+		uint32_t sent_seq = 0;
+		uint32_t expect_ack = 0;
 		bool acked = false;
 		int data_start = 0;
 		int data_length = 0;
@@ -152,6 +154,11 @@ private:
 	void remove_tcp_context (int, int);
 	bool insert_sent_packet (struct sent_packet **, struct sent_packet *);
 	double get_timeout_interval (std::list< struct tcp_context >::iterator);
+
+	void remove_acked_packet (std::list< struct sent_packet >*);
+	void check_acked_packet (std::list< struct sent_packet >*, unsigned int);
+	int unacked_data (std::list< struct sent_packet >);
+	
 	void insert_recv_packet (std::list< struct recv_packet > *, struct recv_packet);
 	int remain_window_size (std::list< struct recv_packet >);
 	int total_data_in_buffer (std::list< struct recv_packet >);

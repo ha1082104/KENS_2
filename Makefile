@@ -53,7 +53,7 @@ test_part4: test_part3
 
 test_dg: all
 	@echo "Running test cases for syscall_read..."
-	@build/testTCP --gtest_filter="TestEnv_Any.TestTransfer_Connect_Recv_SmallBuffer2"
+	@build/testTCP --gtest_filter="TestEnv_Any.TestTransfer_Accept_Send_Symmetric"
 
 test_jh: all
 	@echo "Running test cases for syscall_read..."
