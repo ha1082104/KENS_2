@@ -1063,7 +1063,6 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 
 void TCPAssignment::timerCallback(void* payload)
 {
-	//std::cout<<"hello~ state: "<<entry->tcp_state<<std::endl;
 	std::list< struct tcp_context >::iterator entry = this->find_tcp_context (((struct timer_arguments *) payload)->pid, ((struct timer_arguments *) payload)->sockfd);
 
 	std::cout<<"hello~ state: "<<entry->tcp_state<<" seq_num: "<<((struct timer_arguments*)payload)->seq_num<<std::endl;
