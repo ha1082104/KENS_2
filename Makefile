@@ -55,6 +55,10 @@ test_dg: all
 	@echo "Running test cases for syscall_read..."
 	@build/testTCP --gtest_filter="TestEnv_Any.TestTransfer_Connect_Send_Symmetric"
 
+test_cg: all
+	@echo "Running test cases for congestion control"
+	@build/testTCP --gtest_filter="TestEnv_Congestion1.TestCongestion1"
+
 test_jh: all
 	@echo "Running test cases for syscall_read..."
 	@build/testTCP --gtest_filter="TestEnv_Any.TestTransfer_Connect_Recv_Symmetric"

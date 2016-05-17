@@ -88,6 +88,7 @@ namespace E
 		UUID transfer_writeUUID;
 		bool is_read_call = false;
 		bool is_write_call= false;
+		bool is_first_write = true;
 	};
 
 	struct tcp_header

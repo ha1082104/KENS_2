@@ -334,7 +334,7 @@ void TCPAssignment::syscall_write (UUID syscallUUID, int pid, int sockfd, const 
 			sent_pkt.data_length = sending_bytes;
 			sent_pkt.sent_time = this->getHost ()->getSystem ()->getCurrentTime ();
 
-			if (loop == 0)	
+			if (current_context->is_first_write)	
 			{
 				UUID timerUUID;
 				
@@ -342,12 +342,13 @@ void TCPAssignment::syscall_write (UUID syscallUUID, int pid, int sockfd, const 
 
 				timer_args->pid = pid;
 				timer_args->sockfd = sockfd;
-				timer_args->seq_num = seq_num;
+				timer_args->seq_num = current_context->seq_num;
 				double timeoutInterval = get_timeout_interval (current_context);
 
 				timerUUID = this->addTimer ((void *) timer_args, this->getHost ()->getSystem ()->getCurrentTime () + timeoutInterval);
 
 				current_context->transfer_timerUUID = timerUUID;
+				current_context->is_first_write = false;
 			}
 
 			current_context->send_buffer.push_back (sent_pkt);
@@ -781,7 +782,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 					ack_packet->writeData (34, &recv_tcp_header->dst_port, 2);
 					ack_packet->writeData (36, &recv_tcp_header->src_port, 2);
 					ack_packet->writeData (38, &seq_num, 4);
-					ack_packet->writeData (42, &ack_num, 4); // TODO: ack_number func
+					ack_packet->writeData (42, &ack_num, 4);
 					ack_packet->writeData (46, &hdr_len, 1);
 					ack_packet->writeData (47, &sending_flag, 1);
 					ack_packet->writeData (48, &rwnd, 2);
@@ -861,7 +862,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 					}
 					
 					current_context->sampleRTT = get_sampleRTT (current_context->send_buffer, recv_ack_num);
-					this->cancelTimer(current_context->transfer_timerUUID);
+					this->cancelTimer(current_context->transfer_timerUUID); //TODO: now, with many dup ACK(improper ack), we cancel timer => cancel timer only when proper acknowledgement is arrived!
 	
 					check_acked_packet (&current_context->send_buffer, recv_ack_num);
 					reset_timer (current_context);
@@ -928,6 +929,8 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 					struct timer_arguments *timer_args = (struct timer_arguments *) malloc (sizeof (struct timer_arguments));
 					timer_args->pid = current_context->pid;
 					timer_args->sockfd = current_context->sockfd;
+					//TODO: random_seq_num!
+					timer_args->seq_num = 10000;
 
 					this->addTimer ((void *) timer_args, this->getHost ()->getSystem ()->getCurrentTime () + 2 * MSL);
 					this->removeFileDescriptor (current_context->pid, current_context->sockfd);
@@ -972,6 +975,8 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 				struct timer_arguments *timer_args = (struct timer_arguments *) malloc (sizeof (struct timer_arguments));
 				timer_args->pid = current_context->pid;
 				timer_args->sockfd = current_context->sockfd;
+				//TODO: random seq num!
+				timer_args->seq_num = 10000;
 
 				this->addTimer ((void *) timer_args, this->getHost ()->getSystem ()->getCurrentTime () + 2 * MSL);
 				this->removeFileDescriptor (current_context->pid, current_context->sockfd);
@@ -989,6 +994,8 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 				struct timer_arguments *timer_args = (struct timer_arguments *) malloc (sizeof (struct timer_arguments));
 				timer_args->pid = current_context->pid;
 				timer_args->sockfd = current_context->sockfd;
+				//TODO: random seq num!
+				timer_args->seq_num = 10000;
 
 				this->addTimer ((void *) timer_args, this->getHost ()->getSystem ()->getCurrentTime () + 2 * MSL);
 				this->removeFileDescriptor (current_context->pid, current_context->sockfd);
@@ -1059,11 +1066,12 @@ void TCPAssignment::timerCallback(void* payload)
 	//std::cout<<"hello~ state: "<<entry->tcp_state<<std::endl;
 	std::list< struct tcp_context >::iterator entry = this->find_tcp_context (((struct timer_arguments *) payload)->pid, ((struct timer_arguments *) payload)->sockfd);
 
-	//std::cout<<"hello~ state: "<<entry->tcp_state<<" seq_num: "<<((struct timer_arguments*)payload)->seq_num<<std::endl;
+	std::cout<<"hello~ state: "<<entry->tcp_state<<" seq_num: "<<((struct timer_arguments*)payload)->seq_num<<std::endl;
 
 	if (entry->tcp_state == E::ESTABLISHED || entry->tcp_state == E::FIN_WAIT_1)
 	{
 		/* Retransmission needed */
+		//std::cout<<"hello~\n";
 	}
 
 	else
