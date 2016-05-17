@@ -158,6 +158,7 @@ private:
 	double get_timeout_interval (std::list< struct tcp_context >::iterator);
 	double get_sampleRTT (std::list< struct sent_packet >, unsigned int);
 	void reset_timer (std::list< struct tcp_context >::iterator);
+	void cancel_timer (std::list< struct sent_packet >, UUID, unsigned int);
 
 	void remove_acked_packet (std::list< struct sent_packet >*);
 	void check_acked_packet (std::list< struct sent_packet >*, unsigned int);
@@ -168,6 +169,7 @@ private:
 	int total_data_in_buffer (std::list< struct recv_packet >);
 	int find_index (std::list< struct recv_packet >, int);
 
+	Packet* find_retransmit_packet (std::list< struct sent_packet >, unsigned int seq_num);
 public:
 	TCPAssignment(Host* host);
 	virtual void initialize();

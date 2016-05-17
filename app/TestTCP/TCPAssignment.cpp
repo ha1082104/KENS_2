@@ -862,7 +862,7 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 					}
 					
 					current_context->sampleRTT = get_sampleRTT (current_context->send_buffer, recv_ack_num);
-					this->cancelTimer(current_context->transfer_timerUUID); //TODO: now, with many dup ACK(improper ack), we cancel timer => cancel timer only when proper acknowledgement is arrived!
+					cancel_timer (current_context->send_buffer, current_context->transfer_timerUUID, recv_ack_num);
 	
 					check_acked_packet (&current_context->send_buffer, recv_ack_num);
 					reset_timer (current_context);
@@ -890,8 +890,8 @@ void TCPAssignment::packetArrived(std::string fromModule, Packet* packet)
 					}
 
 					current_context->sampleRTT = get_sampleRTT (current_context->send_buffer, recv_ack_num);
-					this->cancelTimer(current_context->transfer_timerUUID);
-
+					cancel_timer (current_context->send_buffer, current_context->transfer_timerUUID, recv_ack_num);
+		
 					check_acked_packet (&current_context->send_buffer, recv_ack_num);
 					reset_timer (current_context);
 					remove_acked_packet (&current_context->send_buffer);		
@@ -1065,12 +1065,14 @@ void TCPAssignment::timerCallback(void* payload)
 {
 	std::list< struct tcp_context >::iterator entry = this->find_tcp_context (((struct timer_arguments *) payload)->pid, ((struct timer_arguments *) payload)->sockfd);
 
-	std::cout<<"hello~ state: "<<entry->tcp_state<<" seq_num: "<<((struct timer_arguments*)payload)->seq_num<<std::endl;
+	//std::cout<<"hello~ state: "<<entry->tcp_state<<" seq_num: "<<((struct timer_arguments*)payload)->seq_num<<std::endl;
 
 	if (entry->tcp_state == E::ESTABLISHED || entry->tcp_state == E::FIN_WAIT_1)
 	{
 		/* Retransmission needed */
-		//std::cout<<"hello~\n";
+		//TODO: core dumped -> maybe NULL? or something else..
+		Packet* retrans_packet = this->clonePacket (find_retransmit_packet(entry->send_buffer, ((struct timer_arguments*)payload)->seq_num));
+		this->sendPacket ("IPv4", retrans_packet);
 	}
 
 	else
@@ -1245,6 +1247,18 @@ void TCPAssignment::reset_timer (std::list< struct tcp_context >::iterator curre
 	current_context->transfer_timerUUID = timerUUID;
 }
 
+void TCPAssignment::cancel_timer (std::list< sent_packet > send_buffer, UUID timerUUID, unsigned int ack_num)
+{
+	std::list< struct sent_packet >::iterator cursor;
+	for (cursor = send_buffer.begin(); cursor != send_buffer.end(); cursor++)
+	{
+		if (cursor->expect_ack == ack_num){
+			this->cancelTimer (timerUUID);
+			return;
+		}
+	}
+}
+
 void TCPAssignment::remove_acked_packet (std::list< struct sent_packet >* send_buffer)
 {
 	if (send_buffer->begin() != send_buffer->end())
@@ -1351,6 +1365,18 @@ int TCPAssignment::find_index (std::list< struct recv_packet > recv_list, int le
 	}
 
 	return index;
+}
+
+Packet* TCPAssignment::find_retransmit_packet(std::list< struct sent_packet > send_buffer, unsigned int seq_num)
+{
+	std::list< struct sent_packet >::iterator cursor;
+	
+	for (cursor = send_buffer.begin(); cursor != send_buffer.end(); cursor++)
+	{
+		if (cursor->sent_seq == seq_num)
+			return cursor->packet;
+	}
+	return NULL;
 }
 
 }
